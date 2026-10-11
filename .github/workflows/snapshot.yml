@@ -1,0 +1,48 @@
+name: Price snapshot
+
+# Keeps snapshot/ in step with the latest TPSO month so the page has something
+# to show when the live price API is slow or blocked.
+on:
+  schedule:
+    - cron: '17 21 * * *'   # 04:17 Bangkok time, daily
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/snapshot.yml'
+      - 'scripts/snapshot.mjs'
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: price-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch latest month for every province
+        run: node scripts/snapshot.mjs
+      - name: Commit when the prices changed
+        id: commit
+        run: |
+          git add snapshot
+          if git diff --cached --quiet; then echo "No change"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update price snapshot"
+          git push
+          echo "pushed=1" >> "$GITHUB_OUTPUT"
+      - name: Rebuild GitHub Pages
+        if: steps.commit.outputs.pushed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" || echo "Pages build request skipped"
